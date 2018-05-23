@@ -99,3 +99,4 @@ ENV/
 # mypy
 .mypy_cache/
 tensorflow/tf-eager/.vscode/settings.json
+tensorflow/.vscode/settings.json
