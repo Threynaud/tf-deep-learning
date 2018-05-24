@@ -7,6 +7,7 @@ import tensorflow.contrib.eager as tfe
 from sklearn import datasets, model_selection, preprocessing
 
 # TODO: Refactor summaries writing, it's a mess
+# TODO: Implement early stopping and keep best strategy for ckpts
 
 tf.enable_eager_execution()
 
@@ -71,25 +72,26 @@ def evaluate(model, dataset):
 
 
 # TODO: Make histograms great again
+# Note: tf.summary doesn't support eager mode yet, use tf.contrib.summary!
 def save_variables_histogram(model):
     tf.contrib.summary.histogram(
         "hidden/weight", tf.cast(model.variables[0], tf.float32))
     tf.contrib.summary.histogram(
         "hidden/bias", tf.cast(model.variables[1], tf.float32))
     tf.contrib.summary.histogram(
-        "hidden/weight", tf.cast(model.variables[2], tf.float32))
+        "output/weight", tf.cast(model.variables[2], tf.float32))
     tf.contrib.summary.histogram(
-        "hidden/bias", tf.cast(model.variables[3], tf.float32))
+        "output/bias", tf.cast(model.variables[3], tf.float32))
 
 
-def fit(model,
-        training_dataset,
-        dev_dataset,
-        optimizer,
-        verbose=False,
-        logdir=None,
-        summary_freq=3,
-        eval_freq=5):
+def train(model,
+          training_dataset,
+          dev_dataset,
+          optimizer,
+          verbose=False,
+          logdir=None,
+          summary_freq=3,
+          eval_freq=5):
 
     loss_and_grads = tfe.implicit_value_and_gradients(sce)
     tf.train.get_or_create_global_step()
@@ -137,13 +139,15 @@ def fit(model,
 @click.option("--batch_size", "-b", default=1, type=int,
               help="Batch size")
 @click.option("--verbose", "-v", is_flag=True, help="Activate verbose mode")
-@click.option("--logdir", "-l", type=str, help="Logdir")
+@click.option("--logdir", "-l", type=str, default='logs', help="Logdir")
+@click.option("--model_dir", "-m", type=str, default='model',
+              help="Checkpoints directory")
 @click.option("--summary-freq", "-f", default=1, type=int,
               help="Frequency at which summary are recorded (number of steps)")
 @click.option("--eval-freq", "-e", default=3, type=int,
               help="Frequency at which model is evaluated (number of steps)")
 def train_iris_model(num_epochs, batch_size, verbose,
-                     logdir, summary_freq, eval_freq):
+                     logdir, model_dir, summary_freq, eval_freq):
     X_train, X_dev, y_train, y_dev = import_data()
     training_dataset = create_dataset(X_train,
                                       y_train,
@@ -160,8 +164,14 @@ def train_iris_model(num_epochs, batch_size, verbose,
     print(f"Using device: {device}")
     with tf.device(device):
         optimizer = tf.train.AdamOptimizer()
-        fit(model, training_dataset, dev_dataset, optimizer, verbose=verbose,
-            logdir=logdir, summary_freq=summary_freq)
+        train(model, training_dataset, dev_dataset, optimizer, verbose=verbose,
+              logdir=logdir, summary_freq=summary_freq)
+
+    checkpoint_prefix = os.path.join(model_dir, 'ckpt')
+    step_counter = tf.train.get_or_create_global_step()
+    checkpoint = tfe.Checkpoint(
+        model=model, optimizer=optimizer, step_counter=step_counter)
+    checkpoint.save(checkpoint_prefix)
 
 
 if __name__ == "__main__":
