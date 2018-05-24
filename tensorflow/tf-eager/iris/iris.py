@@ -6,6 +6,8 @@ import tensorflow as tf
 import tensorflow.contrib.eager as tfe
 from sklearn import datasets, model_selection, preprocessing
 
+# TODO: Refactor summaries writing, it's a mess
+
 tf.enable_eager_execution()
 
 
@@ -61,11 +63,23 @@ def evaluate(model, dataset):
         accuracy(tf.argmax(model(inputs), axis=1, output_type=tf.int64),
                  tf.argmax(labels, axis=1))
     print(f"Dev set: Average loss: {avg_loss.result()},\
-    Accuracy: {100 * accuracy.result()}\n")
+    Accuracy: {100 * accuracy.result()}")
 
     with tf.contrib.summary.always_record_summaries():
         tf.contrib.summary.scalar('loss', avg_loss.result())
         tf.contrib.summary.scalar('accuracy', accuracy.result())
+
+
+# TODO: Make histograms great again
+def save_variables_histogram(model):
+    tf.contrib.summary.histogram(
+        "hidden/weight", tf.cast(model.variables[0], tf.float32))
+    tf.contrib.summary.histogram(
+        "hidden/bias", tf.cast(model.variables[1], tf.float32))
+    tf.contrib.summary.histogram(
+        "hidden/weight", tf.cast(model.variables[2], tf.float32))
+    tf.contrib.summary.histogram(
+        "hidden/bias", tf.cast(model.variables[3], tf.float32))
 
 
 def fit(model,
@@ -81,9 +95,11 @@ def fit(model,
     tf.train.get_or_create_global_step()
 
     if logdir:
+        if tf.gfile.Exists(logdir):
+            tf.gfile.DeleteRecursively(logdir)
+        tf.gfile.MakeDirs(logdir)
         train_dir = os.path.join(logdir, 'train')
         dev_dir = os.path.join(logdir, 'dev')
-        tf.gfile.MakeDirs(logdir)
     else:
         train_dir = None
         dev_dir = None
@@ -108,9 +124,10 @@ def fit(model,
             if logdir:
                 with tf.contrib.summary.record_summaries_every_n_global_steps(summary_freq):  # NOQA
                     tf.contrib.summary.scalar("loss", loss)
+                    save_variables_histogram(model)
 
-        with dev_summary_writer.as_default():
-            if logdir and global_step % eval_freq == 0:
+        if logdir and global_step % eval_freq == 0:
+            with dev_summary_writer.as_default():
                 evaluate(model, dev_dataset)
 
 
