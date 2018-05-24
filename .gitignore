@@ -100,3 +100,4 @@ ENV/
 .mypy_cache/
 tensorflow/tf-eager/.vscode/settings.json
 tensorflow/.vscode/settings.json
+tensorflow/tf-eager/iris/logs
