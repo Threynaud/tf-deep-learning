@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+import os
+
 import click
 import tensorflow as tf
 import tensorflow.contrib.eager as tfe
@@ -7,7 +9,7 @@ from sklearn import datasets, model_selection, preprocessing
 tf.enable_eager_execution()
 
 
-def import_dataset():
+def import_data():
     data = datasets.load_iris()
 
     X = preprocessing.MinMaxScaler(feature_range=(-1, +1)).fit_transform(
@@ -32,13 +34,13 @@ class Model(tf.keras.Model):
         return outputs
 
 
-def create_data_iterator(X, y, num_epochs=1, batch_size=10):
+def create_dataset(X, y, num_epochs=1, batch_size=10):
     dataset = (tf.data.Dataset().from_tensor_slices((X, y))
                                 .shuffle(1000)
                                 .repeat(num_epochs)
                                 .batch(batch_size))
-    iterator = tfe.Iterator(dataset)
-    return iterator
+    # iterator = tfe.Iterator(dataset)
+    return dataset
 
 
 def sce(model, inputs, labels):
@@ -49,9 +51,10 @@ def sce(model, inputs, labels):
     return(loss)
 
 
-def evaluate(model, iterator, logdir=None):
+def evaluate(model, dataset):
     avg_loss = tfe.metrics.Mean('loss')
     accuracy = tfe.metrics.Accuracy('accuracy')
+    iterator = tfe.Iterator(dataset)
 
     for inputs, labels in iterator:
         avg_loss(sce(model, inputs, labels))
@@ -59,14 +62,15 @@ def evaluate(model, iterator, logdir=None):
                  tf.argmax(labels, axis=1))
     print(f"Dev set: Average loss: {avg_loss.result()},\
     Accuracy: {100 * accuracy.result()}\n")
+
     with tf.contrib.summary.always_record_summaries():
         tf.contrib.summary.scalar('loss', avg_loss.result())
         tf.contrib.summary.scalar('accuracy', accuracy.result())
 
 
 def fit(model,
-        training_iterator,
-        dev_iterator,
+        training_dataset,
+        dev_dataset,
         optimizer,
         verbose=False,
         logdir=None,
@@ -77,25 +81,37 @@ def fit(model,
     tf.train.get_or_create_global_step()
 
     if logdir:
-        summary_writer = tf.contrib.summary.create_file_writer(logdir)
-        summary_writer.set_as_default()
+        train_dir = os.path.join(logdir, 'train')
+        dev_dir = os.path.join(logdir, 'dev')
+        tf.gfile.MakeDirs(logdir)
+    else:
+        train_dir = None
+        dev_dir = None
+    summary_writer = tf.contrib.summary.create_file_writer(
+        train_dir, flush_millis=10000)
+    dev_summary_writer = tf.contrib.summary.create_file_writer(
+        dev_dir, flush_millis=10000, name='dev')
+    # Note: Important to give a name to at least one of them or tensorfboard
+    # mix them up for no reason
 
-    for batched_inputs, batched_labels in training_iterator:
-        loss, grads = loss_and_grads(
-            model, batched_inputs, batched_labels)
-        optimizer.apply_gradients(
-            grads, global_step=tf.train.get_global_step())
+    for batched_inputs, batched_labels in tfe.Iterator(training_dataset):
+        with summary_writer.as_default():
+            loss, grads = loss_and_grads(
+                model, batched_inputs, batched_labels)
+            optimizer.apply_gradients(
+                grads, global_step=tf.train.get_global_step())
 
-        global_step = tf.train.get_global_step().numpy()
-        if verbose and global_step % 10 == 0:
-            print(f"Loss at step {global_step}: {loss}")
+            global_step = tf.train.get_global_step().numpy()
+            if verbose and global_step % 10 == 0:
+                print(f"Loss at step {global_step}: {loss}")
 
-        if logdir:
-            with tf.contrib.summary.record_summaries_every_n_global_steps(summary_freq):  # NOQA
-                tf.contrib.summary.scalar("loss", loss)
+            if logdir:
+                with tf.contrib.summary.record_summaries_every_n_global_steps(summary_freq):  # NOQA
+                    tf.contrib.summary.scalar("loss", loss)
 
-        if global_step % eval_freq == 0:
-            evaluate(model, dev_iterator, logdir=logdir)
+        with dev_summary_writer.as_default():
+            if logdir and global_step % eval_freq == 0:
+                evaluate(model, dev_dataset)
 
 
 @click.command()
@@ -111,15 +127,15 @@ def fit(model,
               help="Frequency at which model is evaluated (number of steps)")
 def train_iris_model(num_epochs, batch_size, verbose,
                      logdir, summary_freq, eval_freq):
-    X_train, X_dev, y_train, y_dev = import_dataset()
-    training_iterator = create_data_iterator(X_train,
-                                             y_train,
-                                             num_epochs=num_epochs,
-                                             batch_size=batch_size)
-    dev_iterator = create_data_iterator(X_train,
-                                        y_train,
-                                        num_epochs=1,
-                                        batch_size=1)
+    X_train, X_dev, y_train, y_dev = import_data()
+    training_dataset = create_dataset(X_train,
+                                      y_train,
+                                      num_epochs=num_epochs,
+                                      batch_size=batch_size)
+    dev_dataset = create_dataset(X_dev,
+                                 y_dev,
+                                 num_epochs=1,
+                                 batch_size=1)
 
     model = Model()
 
@@ -127,7 +143,7 @@ def train_iris_model(num_epochs, batch_size, verbose,
     print(f"Using device: {device}")
     with tf.device(device):
         optimizer = tf.train.AdamOptimizer()
-        fit(model, training_iterator, dev_iterator, optimizer, verbose=verbose,
+        fit(model, training_dataset, dev_dataset, optimizer, verbose=verbose,
             logdir=logdir, summary_freq=summary_freq)
 
 
