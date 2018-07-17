@@ -102,3 +102,4 @@ tensorflow/tf-eager/.vscode/settings.json
 tensorflow/.vscode/settings.json
 tensorflow/tf-eager/iris/logs
 tensorflow/tf-eager/iris/model
+.vscode
